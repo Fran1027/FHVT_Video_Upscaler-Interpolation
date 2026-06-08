@@ -1,10 +1,9 @@
-import sys
 import os
 import cv2
 import qtawesome as qta
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QFileDialog, QProgressBar, QTextEdit,
+    QPushButton, QLabel, QProgressBar, QTextEdit,
     QComboBox, QGroupBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
@@ -64,14 +63,15 @@ def get_video_info_and_thumb(filepath):
             duration_str = f"{seconds}s"
     # ------------------------------
     
-    # Extract thumbnail (first frame or middle)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, total_frames // 2))
+    # Extraer miniatura (Fotograma cercano al inicio para evitar congelar la interfaz al decodificar)
+    # Evitamos el fotograma 0 porque suele ser totalmente negro (fade in).
+    safe_frame = min(12, total_frames - 1) if total_frames > 0 else 0
+    cap.set(cv2.CAP_PROP_POS_FRAMES, safe_frame)
     ret, frame = cap.read()
     cap.release()
     
     pixmap = None
     if ret:
-        from PyQt6.QtWidgets import QApplication
         screen_w = QApplication.primaryScreen().geometry().width()
         # 200px en 1920p es aproximadamente el 10.4%
         new_w = int(screen_w * 0.104) 
@@ -155,7 +155,7 @@ class MainWindow(QMainWindow):
         screen = QApplication.primaryScreen().geometry()
         
         # El tamaño inicial será el 60% de la pantalla actual (así se adapta a 1080p, 4K, 8K)
-        initial_width = int(screen.width() * 0.50)
+        initial_width = int(screen.width() * 0.60)
         initial_height = int(screen.height() * 0.80)
         
         # Evitar que sea más pequeña que el mínimo en pantallas muy chicas
@@ -225,9 +225,12 @@ class MainWindow(QMainWindow):
         # Codec
         settings_layout.addWidget(QLabel("3. Códec de Salida"))
         self.combo_codec = QComboBox()
-        self.combo_codec.addItem("H.264 (Universal)", "libx264")
-        self.combo_codec.addItem("H.265 / HEVC (Eficiente)", "libx265")
-        self.combo_codec.addItem("AV1 (Nueva Generación)", "libsvtav1")
+        self.combo_codec.addItem("H.264 (Universal / Lento)", "libx264")
+        self.combo_codec.addItem("H.264 Acelerado (NVENC GPU)", "h264_nvenc")
+        self.combo_codec.addItem("H.265 / HEVC (Eficiente / Lento)", "libx265")
+        self.combo_codec.addItem("H.265 Acelerado (NVENC GPU)", "hevc_nvenc")
+        self.combo_codec.addItem("AV1 (Nueva Gen / Muy Lento)", "libsvtav1")
+        self.combo_codec.addItem("AV1 Acelerado (NVENC RTX 4000+)", "av1_nvenc")
         settings_layout.addWidget(self.combo_codec)
         
         settings_layout.addStretch() # Empujar componentes hacia arriba para que queden alineados visualmente
@@ -434,15 +437,14 @@ class MainWindow(QMainWindow):
         self.reset_ui()
         
     def on_finished(self):
-        self.info_msg("✅ Operación terminada.")
-        self.log_msg("✅ Operación terminada.")
-        
         if os.path.exists(self.output_file):
+            self.info_msg("✅ Operación terminada.")
+            self.log_msg("✅ Operación terminada.")
             pixmap, details = get_video_info_and_thumb(self.output_file)
             self.drop_out.set_loading(False)
             self.drop_out.set_video_data(self.output_file, pixmap, details)
         else:
-            self.drop_out.reset("Cancelado")
+            self.drop_out.reset("Operación Cancelada")
             
         self.reset_ui()
         

@@ -1,9 +1,9 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QPushButton, QFileDialog, QFrame, QSizePolicy, QGridLayout
+    QPushButton, QFileDialog, QFrame, QGridLayout, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QRectF
-from PyQt6.QtGui import QPainter, QColor, QPen, QPixmap, QCursor
+from PyQt6.QtGui import QPainter, QColor, QPen, QCursor
 import os
 
 class LoadingCircle(QWidget):
@@ -62,11 +62,11 @@ class DropZone(QFrame):
         self.setAcceptDrops(self.is_interactive)
         self.setMinimumHeight(150)
         
-        # Calcular el ancho ideal (12.7% de la pantalla, que equivale a ~245px en 1080p)
-        from PyQt6.QtWidgets import QApplication
+        # Calcular el ancho ideal mínimo basado en la pantalla
         screen_w = QApplication.primaryScreen().geometry().width()
         ideal_width = int(screen_w * 0.15)
-        self.setFixedWidth(ideal_width)
+        self.setMinimumWidth(ideal_width)
+        # Al no usar setFixedWidth, el contenedor ahora es dinámico y empujará sus bordes si el texto interior es muy grande.
         
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor) if is_interactive else QCursor(Qt.CursorShape.ArrowCursor))

@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import time
 import threading
+import math
 from datetime import datetime
 from core.ai_engine import run_ncnn_engine
 
@@ -40,7 +41,6 @@ class VideoPipeline:
                 pass
 
     def process(self, input_path, output_path, batch_size=2):
-        import math
         self._log(f"Iniciando procesamiento: {self.mode.upper()} (Modo por Lotes/Chunks)")
         
         start_time = time.time()
@@ -68,9 +68,14 @@ class VideoPipeline:
                 cmd_placebo = [
                     "ffmpeg", "-y", "-i", input_path,
                     "-vf", f"libplacebo=w=iw*{self.multiplier}:h=ih*{self.multiplier}:upscaler=ewa_lanczos",
-                    "-c:v", self.codec, "-crf", "18", "-preset", "fast", "-pix_fmt", "yuv420p",
-                    "-c:a", "copy", output_path
+                    "-c:v", self.codec, "-pix_fmt", "yuv420p",
+                    "-c:a", "copy"
                 ]
+                if "nvenc" in self.codec:
+                    cmd_placebo.extend(["-cq", "18", "-preset", "p6"])
+                else:
+                    cmd_placebo.extend(["-crf", "18", "-preset", "fast"])
+                cmd_placebo.append(output_path)
                 self.current_process = subprocess.Popen(cmd_placebo, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self.current_process.wait()
                 if self.is_cancelled: return
@@ -123,7 +128,6 @@ class VideoPipeline:
                 # Iniciar Hilo Animador de Puntos
                 stop_anim = threading.Event()
                 def animator():
-                    import time as t
                     dots = 0
                     # Para empezar en una linea limpia
                     self._info(f"Lote {i+1}/{total_chunks} procesando...")
@@ -132,7 +136,7 @@ class VideoPipeline:
                         dots = (dots + 1) % 4
                         for _ in range(5): # Bucle corto para reaccionar rápido a la cancelación
                             if stop_anim.is_set(): break
-                            t.sleep(0.1)
+                            time.sleep(0.1)
                 
                 anim_thread = threading.Thread(target=animator)
                 anim_thread.start()
@@ -167,8 +171,13 @@ class VideoPipeline:
                     chunk_out_path = os.path.join(tmp_chunks, f"chunk_{i:04d}.mp4")
                     cmd_encode_chunk = [
                         "ffmpeg", "-y", "-framerate", str(out_fps), "-i", os.path.join(tmp_out, "%08d.png"),
-                        "-c:v", self.codec, "-crf", "18", "-pix_fmt", "yuv420p", chunk_out_path
+                        "-c:v", self.codec, "-pix_fmt", "yuv420p"
                     ]
+                    if "nvenc" in self.codec:
+                        cmd_encode_chunk.extend(["-cq", "18", "-preset", "p6"])
+                    else:
+                        cmd_encode_chunk.extend(["-crf", "18"])
+                    cmd_encode_chunk.append(chunk_out_path)
                     self.current_process = subprocess.Popen(cmd_encode_chunk, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     self.current_process.wait()
                     if os.path.exists(chunk_out_path): chunk_files.append(chunk_out_path)
@@ -245,8 +254,14 @@ class VideoPipeline:
                 raise
         finally:
             self.current_process = None
+            if self.is_cancelled:
+                self._info("\n⚠️ Operación cancelada por el usuario.")
+                self._log("Operación abortada por instrucción de cancelación.")
+                
             self._log("Limpiando todos los archivos temporales...")
             time.sleep(1) # Pausa para asegurar que los procesos soltaron los archivos
             shutil.rmtree(tmp_in, ignore_errors=True)
             shutil.rmtree(tmp_out, ignore_errors=True)
             shutil.rmtree(tmp_chunks, ignore_errors=True)
+            if self.is_cancelled:
+                self._info("✅ Limpieza de archivos temporales completada.")

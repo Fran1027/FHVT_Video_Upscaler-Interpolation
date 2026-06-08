@@ -1,6 +1,6 @@
 import os
 import subprocess
-import threading
+import glob
 
 def get_providers():
     return ["NCNN Vulkan GPU (0)"]
@@ -50,7 +50,6 @@ def run_ncnn_engine(engine_type, input_dir, output_dir, width, height, model_nam
         info_callback(f"Perfil Seleccionado: {perfil} | Hilos: {threads} | Azulejos: {tile_size if tile_size != '0' else 'Auto'}")
 
     if engine_type == 'upscale':
-        import glob
         search_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "bin", "realesrgan", "**", "realesrgan-ncnn-vulkan.exe")
         exes = glob.glob(search_path, recursive=True)
         if not exes:
@@ -62,7 +61,6 @@ def run_ncnn_engine(engine_type, input_dir, output_dir, width, height, model_nam
             cmd.extend(["-n", model_name])
 
     elif engine_type == 'upscale_cugan':
-        import glob
         search_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "bin", "realcugan", "**", "realcugan-ncnn-vulkan.exe")
         exes = glob.glob(search_path, recursive=True)
         if not exes:
@@ -75,7 +73,6 @@ def run_ncnn_engine(engine_type, input_dir, output_dir, width, height, model_nam
             
             
     elif engine_type == 'interpolate':
-        import glob
         search_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "bin", "rife", "**", "rife-ncnn-vulkan.exe")
         exes = glob.glob(search_path, recursive=True)
         if not exes:
