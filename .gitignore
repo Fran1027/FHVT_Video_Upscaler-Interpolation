@@ -1,0 +1,31 @@
+# Entornos virtuales y caché
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+
+# IDEs y configuración del sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Binarios gigantes y modelos de IA (No subir a GitHub)
+bin/
+
+# Archivos y carpetas temporales de FFmpeg
+.tmp_in_frames/
+.tmp_out_frames/
+.tmp_chunks/
+*.tmp
+*.log
+
+# Archivos locales o de pruebas (opcional)
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.jpg
+*.png
