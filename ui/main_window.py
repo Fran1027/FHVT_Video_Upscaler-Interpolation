@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QGroupBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QPalette, QColor, QFont, QImage, QPixmap
+from PyQt6.QtGui import QPalette, QColor, QFont, QImage, QPixmap, QTextCursor
 
 from core.ai_engine import get_providers
 from core.video_pipeline import VideoPipeline
@@ -71,8 +71,12 @@ def get_video_info_and_thumb(filepath):
     
     pixmap = None
     if ret:
-        new_w = 200
-        new_h = int(new_w * height / width) if width > 0 else 150
+        from PyQt6.QtWidgets import QApplication
+        screen_w = QApplication.primaryScreen().geometry().width()
+        # 200px en 1920p es aproximadamente el 10.4%
+        new_w = int(screen_w * 0.104) 
+        
+        new_h = int(new_w * height / width) if width > 0 else int(new_w * 0.75)
         frame = cv2.resize(frame, (new_w, new_h))
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = frame.shape
@@ -143,8 +147,23 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("FHVT Video AI (NCNN Vulkan)")
-        # Tamaño fijo estético y simétrico
-        self.setFixedSize(750, 950)
+        
+        # Tamaño dinámico y responsivo
+        self.setMinimumSize(1000, 700) # Tamaño mínimo para que no se deforme
+        
+        # Obtener resolución de pantalla
+        screen = QApplication.primaryScreen().geometry()
+        
+        # El tamaño inicial será el 60% de la pantalla actual (así se adapta a 1080p, 4K, 8K)
+        initial_width = int(screen.width() * 0.50)
+        initial_height = int(screen.height() * 0.80)
+        
+        # Evitar que sea más pequeña que el mínimo en pantallas muy chicas
+        initial_width = max(initial_width, 1000)
+        initial_height = max(initial_height, 700)
+        
+        self.resize(initial_width, initial_height)
+        
         self.worker = None
 
         main_widget = QWidget()
@@ -152,7 +171,10 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(main_widget)
         layout.setSpacing(15)
 
-        # 1. Input/Output Selection (Drag and Drop Zones)
+        # 1. Top Section (Archivos y Ajustes en 3 columnas)
+        top_layout = QHBoxLayout()
+        
+        # 1A. Input/Output Selection
         group_io = QGroupBox("Archivos")
         io_layout = QHBoxLayout()
         
@@ -162,16 +184,16 @@ class MainWindow(QMainWindow):
         self.drop_out = DropZone("Archivo Resultante\n(Esperando proceso...)", is_interactive=False)
         self.drop_out.setEnabled(False)
         
-        # Ocupar 50% y 50% exacto
         io_layout.addWidget(self.drop_in, stretch=1)
         io_layout.addWidget(self.drop_out, stretch=1)
         
         group_io.setLayout(io_layout)
-        layout.addWidget(group_io)
+        top_layout.addWidget(group_io, stretch=2)
 
-        # 2. Hardware and Model Selection
-        self.group_settings = QGroupBox("Ajustes de Procesamiento (NCNN Vulkan)")
+        # 1B. Hardware and Model Selection
+        self.group_settings = QGroupBox("Ajustes (NCNN Vulkan)")
         settings_layout = QVBoxLayout()
+        settings_layout.setSpacing(15)
         
         # Modo
         settings_layout.addWidget(QLabel("1. Modo de Procesamiento"))
@@ -208,8 +230,12 @@ class MainWindow(QMainWindow):
         self.combo_codec.addItem("AV1 (Nueva Generación)", "libsvtav1")
         settings_layout.addWidget(self.combo_codec)
         
+        settings_layout.addStretch() # Empujar componentes hacia arriba para que queden alineados visualmente
+        
         self.group_settings.setLayout(settings_layout)
-        layout.addWidget(self.group_settings)
+        top_layout.addWidget(self.group_settings, stretch=1)
+        
+        layout.addLayout(top_layout)
 
         # 3. Consoles Layout
         consoles_layout = QHBoxLayout()
@@ -322,7 +348,11 @@ class MainWindow(QMainWindow):
             
         suffix = f"_{motor}_{tarea}_{multi}"
         self.output_file = f"{base}{suffix}{ext}"
-        self.drop_out.lbl_title.setText(f"Salida planeada:\n{os.path.basename(self.output_file)}")
+        
+        # Filtro de texto para evitar que rompa la tarjeta
+        out_name = os.path.basename(self.output_file)
+        display_name = out_name.replace("_", "_\u200B").replace("-", "-\u200B").replace(".", ".\u200B")
+        self.drop_out.lbl_title.setText(f"Salida planeada:\n{display_name}")
 
     def select_input_file(self, filepath):
         self.input_file = filepath
@@ -339,7 +369,17 @@ class MainWindow(QMainWindow):
         scrollbar.setValue(scrollbar.maximum())
 
     def info_msg(self, msg):
-        self.info_console.append(msg)
+        if msg.startswith("\r"):
+            clean_msg = msg[1:]
+            cursor = self.info_console.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            # Aseguramos borrar solo el texto de la línea actual, no el separador de bloque
+            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+            cursor.insertText(clean_msg)
+        else:
+            self.info_console.append(msg)
+            
         scrollbar = self.info_console.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
@@ -356,7 +396,8 @@ class MainWindow(QMainWindow):
         self.group_settings.setEnabled(False)
         
         self.btn_cancel.setEnabled(True)
-        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
         self.console.clear()
         self.info_console.clear()
         

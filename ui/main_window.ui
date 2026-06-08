@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+    <class>MainWindow</class>
+    <widget class="QMainWindow" name="MainWindow">
+        <property name="geometry">
+            <rect>
+                <x>0</x>
+                <y>0</y>
+                <width>1000</width>
+                <height>700</height>
+            </rect>
+        </property>
+        <property name="minimumSize">
+            <size>
+                <width>1000</width>
+                <height>700</height>
+            </size>
+        </property>
+        <property name="windowTitle">
+            <string>FHVT Video AI (NCNN Vulkan)</string>
+        </property>
+        <property name="styleSheet">
+            <string notr="true">
+    QMainWindow { background-color: #1e1e1e; }
+    QWidget { color: #ffffff; font-family: 'Segoe UI', Arial; }
+    QGroupBox { font-weight: bold; border: 1px solid #333333; border-radius: 6px; margin-top: 12px; padding-top: 10px; }
+    QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 10px; padding: 0 3px; }
+    QComboBox { background-color: #2d2d2d; border: 1px solid #444444; border-radius: 4px; padding: 5px; color: #ffffff; }
+    QComboBox::drop-down { border: 0px; }
+    QTextEdit { background-color: #2d2d2d; border: 1px solid #333333; border-radius: 4px; }
+    QProgressBar { border: 1px solid #444444; border-radius: 4px; text-align: center; background-color: #2d2d2d; }
+    QProgressBar::chunk { background-color: #2a82da; }
+    QLabel { color: #aaaaaa; }
+            </string>
+        </property>
+        <widget class="QWidget" name="main_widget">
+            <layout class="QVBoxLayout" name="verticalLayout">
+                <property name="spacing">
+                    <number>15</number>
+                </property>
+                <item>
+                    <layout class="QHBoxLayout" name="top_layout" stretch="2,1">
+                        <item>
+                            <widget class="QGroupBox" name="group_io">
+                                <property name="title">
+                                    <string>Archivos</string>
+                                </property>
+                                <layout class="QHBoxLayout" name="io_layout" stretch="1,1">
+                                    <item>
+                                        <widget class="DropZone" name="drop_in" native="true"/>
+                                    </item>
+                                    <item>
+                                        <widget class="DropZone" name="drop_out" native="true"/>
+                                    </item>
+                                </layout>
+                            </widget>
+                        </item>
+                        <item>
+                            <widget class="QGroupBox" name="group_settings">
+                                <property name="title">
+                                    <string>Ajustes (NCNN Vulkan)</string>
+                                </property>
+                                <layout class="QVBoxLayout" name="settings_layout">
+                                    <property name="spacing">
+                                        <number>15</number>
+                                    </property>
+                                    <item>
+                                        <widget class="QLabel" name="lbl_modo">
+                                            <property name="text">
+                                                <string>1. Modo de Procesamiento</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QComboBox" name="combo_mode"/>
+                                    </item>
+                                    <item>
+                                        <widget class="QLabel" name="lbl_hardware">
+                                            <property name="text">
+                                                <string>2. Proveedor (Hardware)</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QComboBox" name="combo_gpu"/>
+                                    </item>
+                                    <item>
+                                        <widget class="QLabel" name="lbl_codec">
+                                            <property name="text">
+                                                <string>3. Códec de Salida</string>
+                                            </property>
+                                        </widget>
+                                    </item>
+                                    <item>
+                                        <widget class="QComboBox" name="combo_codec"/>
+                                    </item>
+                                    <item>
+                                        <spacer name="verticalSpacer">
+                                            <property name="orientation">
+                                                <enum>Qt::Vertical</enum>
+                                            </property>
+                                            <property name="sizeHint" stdset="0">
+                                                <size>
+                                                    <width>20</width>
+                                                    <height>40</height>
+                                                </size>
+                                            </property>
+                                        </spacer>
+                                    </item>
+                                </layout>
+                            </widget>
+                        </item>
+                    </layout>
+                </item>
+                <item>
+                    <layout class="QHBoxLayout" name="consoles_layout" stretch="1,1">
+                        <item>
+                            <layout class="QVBoxLayout" name="info_layout">
+                                <item>
+                                    <widget class="QLabel" name="lbl_info">
+                                        <property name="text">
+                                            <string>Información General</string>
+                                        </property>
+                                    </widget>
+                                </item>
+                                <item>
+                                    <widget class="QTextEdit" name="info_console">
+                                        <property name="styleSheet">
+                                            <string notr="true">color: #4CAF50; font-family: 'Consolas'; font-size: 10pt;</string>
+                                        </property>
+                                        <property name="readOnly">
+                                            <bool>true</bool>
+                                        </property>
+                                    </widget>
+                                </item>
+                            </layout>
+                        </item>
+                        <item>
+                            <layout class="QVBoxLayout" name="tech_layout">
+                                <item>
+                                    <widget class="QLabel" name="lbl_tech">
+                                        <property name="text">
+                                            <string>Registro Técnico (NCNN/FFmpeg)</string>
+                                        </property>
+                                    </widget>
+                                </item>
+                                <item>
+                                    <widget class="QTextEdit" name="console">
+                                        <property name="styleSheet">
+                                            <string notr="true">color: #999999; font-family: 'Consolas'; font-size: 8pt;</string>
+                                        </property>
+                                        <property name="readOnly">
+                                            <bool>true</bool>
+                                        </property>
+                                    </widget>
+                                </item>
+                            </layout>
+                        </item>
+                    </layout>
+                </item>
+                <item>
+                    <widget class="QProgressBar" name="progress_bar">
+                        <property name="value">
+                            <number>0</number>
+                        </property>
+                    </widget>
+                </item>
+                <item>
+                    <layout class="QHBoxLayout" name="btn_layout">
+                        <item>
+                            <widget class="QPushButton" name="btn_start">
+                                <property name="minimumSize">
+                                    <size>
+                                        <width>0</width>
+                                        <height>40</height>
+                                    </size>
+                                </property>
+                                <property name="styleSheet">
+                                    <string notr="true">
+          QPushButton { background-color: #333333; border: 1px solid #555555; border-radius: 4px; color: #FFFFFF; font-weight: bold; font-size: 14px; }
+          QPushButton:enabled:hover { background-color: #4CAF50; border: 1px solid #4CAF50; color: white; }
+          QPushButton:disabled { background-color: #222222; color: #777777; border: 1px solid #333333; }
+          QPushButton:pressed { background-color: #388E3C; }
+                                    </string>
+                                </property>
+                                <property name="text">
+                                    <string>Iniciar</string>
+                                </property>
+                            </widget>
+                        </item>
+                        <item>
+                            <widget class="QPushButton" name="btn_cancel">
+                                <property name="enabled">
+                                    <bool>false</bool>
+                                </property>
+                                <property name="minimumSize">
+                                    <size>
+                                        <width>0</width>
+                                        <height>40</height>
+                                    </size>
+                                </property>
+                                <property name="styleSheet">
+                                    <string notr="true">
+          QPushButton { background-color: #333333; border: 1px solid #555555; border-radius: 4px; color: #FFFFFF; font-weight: bold; font-size: 14px; }
+          QPushButton:enabled:hover { background-color: #4CAF50; border: 1px solid #4CAF50; color: white; }
+          QPushButton:disabled { background-color: #222222; color: #777777; border: 1px solid #333333; }
+          QPushButton:pressed { background-color: #388E3C; }
+                                    </string>
+                                </property>
+                                <property name="text">
+                                    <string>Cancelar</string>
+                                </property>
+                            </widget>
+                        </item>
+                    </layout>
+                </item>
+            </layout>
+        </widget>
+    </widget>
+    <customwidgets>
+        <customwidget>
+            <class>DropZone</class>
+            <extends>QWidget</extends>
+            <header>ui.custom_widgets</header>
+            <container>1</container>
+        </customwidget>
+    </customwidgets>
+    <resources/>
+    <connections/>
+</ui>

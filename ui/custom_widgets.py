@@ -61,6 +61,13 @@ class DropZone(QFrame):
         
         self.setAcceptDrops(self.is_interactive)
         self.setMinimumHeight(150)
+        
+        # Calcular el ancho ideal (12.7% de la pantalla, que equivale a ~245px en 1080p)
+        from PyQt6.QtWidgets import QApplication
+        screen_w = QApplication.primaryScreen().geometry().width()
+        ideal_width = int(screen_w * 0.15)
+        self.setFixedWidth(ideal_width)
+        
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor) if is_interactive else QCursor(Qt.CursorShape.ArrowCursor))
         
@@ -82,6 +89,8 @@ class DropZone(QFrame):
         self.lbl_title = QLabel(title)
         self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #CCC;")
+        self.lbl_title.setWordWrap(True) # Para que los nombres largos bajen a otra línea en vez de reventar el ancho
+
         
         # 4. Detalles (Layout Vertical para lineas horizontales y grid de badges)
         self.details_widget = QWidget()
@@ -135,7 +144,11 @@ class DropZone(QFrame):
         self.lbl_thumb.setPixmap(thumb_pixmap)
         self.lbl_thumb.show()
         
-        self.lbl_title.setText(os.path.basename(filepath))
+        # Truco UI: Insertar Zero-Width Spaces (\u200B) después de guiones, puntos y guiones bajos 
+        # para obligar al WordWrap a saltar de línea en caso de que el nombre sea un string continuo
+        display_name = os.path.basename(filepath)
+        display_name = display_name.replace("_", "_\u200B").replace("-", "-\u200B").replace(".", ".\u200B")
+        self.lbl_title.setText(display_name)
         
         # Limpiar el layout anterior
         while self.details_layout.count():

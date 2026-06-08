@@ -97,25 +97,17 @@ def run_ncnn_engine(engine_type, input_dir, output_dir, width, height, model_nam
     if process_tracker:
         process_tracker(process)
     
-    # NCNN vulkan outputea el progreso por stderr (redireccionado a stdout aqui)
     for line in process.stdout:
         line = line.strip()
         if not line:
             continue
-        if line.endswith("%"):
-            try:
-                pct = float(line[:-1])
-                if progress_callback:
-                    progress_callback(int(pct), 100)
-            except ValueError:
-                pass
-        else:
-            if log_callback:
-                log_callback(line)
+        # Ignoramos líneas de progreso si la IA las emite
+        if log_callback and not line.endswith("%"):
+            log_callback(line)
             
     process.wait()
     if process.returncode != 0:
-        # Avoid raising error if process was forcibly terminated by user (usually returns negative codes or 1 depending on OS, but we'll check cancel state in Pipeline)
+        # Avoid raising error if process was forcibly terminated by user
         raise Exception(f"El motor {engine_type} devolvió error o fue forzado a salir: {process.returncode}")
     
     return True

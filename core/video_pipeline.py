@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import time
+import threading
 from datetime import datetime
 from core.ai_engine import run_ncnn_engine
 
@@ -44,8 +45,6 @@ class VideoPipeline:
         
         start_time = time.time()
         start_dt = datetime.now()
-        self._info(f"== Nueva Tarea: {self.mode.upper()} ==")
-        self._info(f"Hora de inicio: {start_dt.strftime('%H:%M:%S')}")
         self._info(f"Video: {os.path.basename(input_path)}")
         
         # 1. Preparar directorios temporales
@@ -92,8 +91,6 @@ class VideoPipeline:
                 "-of", "csv=p=0", input_path
             ]
             result_info = subprocess.run(cmd_info, capture_output=True, text=True)
-            
-            # ffprobe puede devolver saltos de línea entre stream_info y format_info
             raw_output = result_info.stdout.strip().replace('\r', '').replace('\n', ',')
             info_parts = [p for p in raw_output.split(',') if p]
             
@@ -105,86 +102,106 @@ class VideoPipeline:
             out_fps = fps * self.multiplier if self.mode == 'interpolate' else fps
             
             # B. Configuración de Lotes (Chunks)
-            chunk_length = 5 # Segundos por lote (Ajusta a 10 si tienes mucho espacio y quieres menos cortes)
+            chunk_length = 5
             total_chunks = math.ceil(duracion_total / chunk_length)
-            self._info(f"El video se procesará en {total_chunks} lotes de {chunk_length}s para ahorrar disco.")
             
-            chunk_files = [] # Lista para guardar la ruta de los videos intermedios
+            # ENCABEZADO LIMPIO
+            self._info(f"== Nueva Tarea: {self.mode.upper()} ==")
+            self._info(f"Hora de inicio: {start_dt.strftime('%H:%M:%S')}")
+            self._info(f"La tarea fue separada en {total_chunks} lotes de {chunk_length}s:")
+            self._info("") # Línea en blanco para separar visualmente
+            
+            chunk_files = [] 
             
             # C. Bucle Principal de Procesamiento
             for i, chunk_start in enumerate(range(0, int(math.ceil(duracion_total)), chunk_length)):
                 if self.is_cancelled: return
                 
                 chunk_start_time = time.time()
-                
-                # Calcular porcentaje base para este lote
-                base_percent = (i / total_chunks) * 100
-                
-                self._info(f"Procesando lote {i+1}/{total_chunks} ({int(base_percent)}%)...")
                 self._log(f"--- Procesando Lote {i+1}/{total_chunks} ({chunk_start}s a {chunk_start + chunk_length}s) ---")
                 
-                # C1. Extraer fotogramas del lote actual
-                cmd_extract = [
-                    "ffmpeg", "-y", "-ss", str(chunk_start), "-t", str(chunk_length), 
-                    "-i", input_path, "-qscale:v", "1", "-qmin", "1", "-qmax", "1",
-                    "-vsync", "0", os.path.join(tmp_in, "%08d.png")
-                ]
-                self.current_process = subprocess.Popen(cmd_extract, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                self.current_process.wait()
+                # Iniciar Hilo Animador de Puntos
+                stop_anim = threading.Event()
+                def animator():
+                    import time as t
+                    dots = 0
+                    # Para empezar en una linea limpia
+                    self._info(f"Lote {i+1}/{total_chunks} procesando...")
+                    while not stop_anim.is_set():
+                        self._info(f"\rLote {i+1}/{total_chunks} procesando{'.' * dots}{' ' * (3 - dots)}")
+                        dots = (dots + 1) % 4
+                        for _ in range(5): # Bucle corto para reaccionar rápido a la cancelación
+                            if stop_anim.is_set(): break
+                            t.sleep(0.1)
                 
-                num_frames = len(os.listdir(tmp_in))
-                if num_frames == 0:
-                    continue # Saltar si el lote quedó vacío (ej. final del video)
+                anim_thread = threading.Thread(target=animator)
+                anim_thread.start()
+                
+                try:
+                    # C1. Extraer fotogramas
+                    cmd_extract = [
+                        "ffmpeg", "-y", "-ss", str(chunk_start), "-t", str(chunk_length), 
+                        "-i", input_path, "-qscale:v", "1", "-qmin", "1", "-qmax", "1",
+                        "-vsync", "0", os.path.join(tmp_in, "%08d.png")
+                    ]
+                    self.current_process = subprocess.Popen(cmd_extract, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    self.current_process.wait()
+                    
+                    num_frames = len(os.listdir(tmp_in))
+                    if num_frames == 0:
+                        self._info(f"\rLote {i+1}/{total_chunks} vacío (Saltado)   ")
+                        continue
+    
+                    # C2. Procesar con NCNN Vulkan
+                    def track_process(p): self.current_process = p
+                    
+                    run_ncnn_engine(
+                        self.mode, tmp_in, tmp_out, width, height, self.model_name, 
+                        progress_callback=None, log_callback=self._log, 
+                        info_callback=None, process_tracker=track_process, 
+                        multiplier=self.multiplier, num_frames=num_frames
+                    )
+                    if self.is_cancelled: return
+    
+                    # C3. Codificar lote
+                    chunk_out_path = os.path.join(tmp_chunks, f"chunk_{i:04d}.mp4")
+                    cmd_encode_chunk = [
+                        "ffmpeg", "-y", "-framerate", str(out_fps), "-i", os.path.join(tmp_out, "%08d.png"),
+                        "-c:v", self.codec, "-crf", "18", "-pix_fmt", "yuv420p", chunk_out_path
+                    ]
+                    self.current_process = subprocess.Popen(cmd_encode_chunk, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    self.current_process.wait()
+                    if os.path.exists(chunk_out_path): chunk_files.append(chunk_out_path)
+                finally:
+                    # Detener animador siempre
+                    stop_anim.set()
+                    anim_thread.join()
 
-                # C2. Procesar fotogramas con NCNN Vulkan
-                def track_process(p): self.current_process = p
-                
-                def chunk_progress_callback(current, total):
-                    # Convertir el progreso local del lote a progreso global
-                    local_percent = (current / total) if total > 0 else 0
-                    global_percent = int(base_percent + (local_percent * (100 / total_chunks)))
-                    if self.progress:
-                        self.progress(global_percent, 100)
-                    if self.info:
-                        self.info(f"Procesando lote {i+1}/{total_chunks} ({global_percent}%)...")
-                
-                run_ncnn_engine(
-                    self.mode, tmp_in, tmp_out, width, height, self.model_name, 
-                    progress_callback=chunk_progress_callback, log_callback=self._log, 
-                    info_callback=None, process_tracker=track_process, 
-                    multiplier=self.multiplier, num_frames=num_frames
-                )
-                if self.is_cancelled: return
-
-                # C3. Codificar lote procesado a un archivo MP4 temporal (Sin audio)
-                chunk_out_path = os.path.join(tmp_chunks, f"chunk_{i:04d}.mp4")
-                cmd_encode_chunk = [
-                    "ffmpeg", "-y", "-framerate", str(out_fps), "-i", os.path.join(tmp_out, "%08d.png"),
-                    "-c:v", self.codec, "-crf", "18", "-pix_fmt", "yuv420p", chunk_out_path
-                ]
-                self.current_process = subprocess.Popen(cmd_encode_chunk, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                self.current_process.wait()
-                
-                if os.path.exists(chunk_out_path):
-                    chunk_files.append(chunk_out_path)
-
-                # C4. LIMPIEZA INMEDIATA: Borrar PNGs masivos para liberar disco antes del siguiente ciclo
+                # C4. Limpieza y Sellado del log
                 for f in os.listdir(tmp_in): os.remove(os.path.join(tmp_in, f))
                 for f in os.listdir(tmp_out): os.remove(os.path.join(tmp_out, f))
                 
-                chunk_end_time = time.time()
-                chunk_dur = chunk_end_time - chunk_start_time
+                chunk_dur = time.time() - chunk_start_time
                 self._log(f"Lote {i+1} completado en {chunk_dur:.1f}s")
+                
+                m, s = divmod(int(chunk_dur), 60)
+                h, m = divmod(m, 60)
+                dur_str = f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"00:{m:02d}:{s:02d}"
+                
+                # SELLAMOS LA LÍNEA FINAL de este lote indicando que terminó y su tiempo
+                self._info(f"\rLote {i+1}/{total_chunks} terminado en {dur_str}   ")
+                
+                # Actualizamos barra global avanzando 1 chunk
+                if self.progress: self.progress(i + 1, total_chunks)
 
             # D. Unir todos los lotes y agregar el audio original
+            self._info("") # Separador
             self._info(f"Paso Final (99%): Uniendo {len(chunk_files)} lotes y restaurando audio...")
             self._log("Concatenando fragmentos de video...")
             
-            # Crear archivo de texto con la lista de lotes para el demuxer concat de FFmpeg
             list_file_path = os.path.join(tmp_chunks, "chunks_list.txt")
             with open(list_file_path, "w", encoding="utf-8") as f:
                 for chunk_file in chunk_files:
-                    # FFmpeg requiere rutas relativas seguras o absolutas formateadas
                     f.write(f"file '{os.path.abspath(chunk_file).replace(chr(92), '/')}'\n")
 
             cmd_concat = [
@@ -204,27 +221,31 @@ class VideoPipeline:
             m, s = divmod(int(total_duration), 60)
             h, m = divmod(m, 60)
             
-            if self.progress:
-                self.progress(100, 100)
+            # Forzamos la barra global al 100%
+            if self.progress: self.progress(100, 100)
                 
             self._log("Proceso completado exitosamente!")
-            self._info("¡Proceso Terminado Exitosamente! (100%)")
+            
+            # Actualizamos el paso final indicando que está listo
+            self._info(f"\rPaso Final (100%): Uniendo {len(chunk_files)} lotes y restaurando audio... ¡Listo!")
+            self._info("")
+            self._info("¡Proceso Terminado Exitosamente!")
             self._info(f"Duración total: {h:02d}:{m:02d}:{s:02d}")
-            self._info("======================\n")
+            self._info("=================================")
 
         except subprocess.CalledProcessError as e:
             if not self.is_cancelled:
                 self._log(f"Error en FFmpeg: {e}")
-                self._info(f"Error: Fallo en FFmpeg.")
+                self._info(f"\n❌ Error: Fallo en FFmpeg.")
                 raise
         except Exception as e:
             if not self.is_cancelled:
                 self._log(f"Error general: {e}")
-                self._info(f"Error: {e}")
+                self._info(f"\n❌ Error: {e}")
                 raise
         finally:
             self.current_process = None
-            self._log("Limpiando todos los archivos y carpetas temporales...")
+            self._log("Limpiando todos los archivos temporales...")
             time.sleep(1) # Pausa para asegurar que los procesos soltaron los archivos
             shutil.rmtree(tmp_in, ignore_errors=True)
             shutil.rmtree(tmp_out, ignore_errors=True)
