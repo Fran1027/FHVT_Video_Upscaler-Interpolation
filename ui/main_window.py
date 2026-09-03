@@ -4,16 +4,16 @@ import qtawesome as qta
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QTextEdit,
-    QComboBox, QGroupBox
+    QComboBox, QGroupBox, QButtonGroup
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPalette, QColor, QFont, QImage, QPixmap, QTextCursor
 
-from core.ai_engine import get_providers
+from core.hardware import check_encoder_support
 from core.video_pipeline import VideoPipeline
 from ui.custom_widgets import DropZone
 
-# Dark Theme setup
+# Global dark theme styling based on the Qt Fusion style engine
 def apply_dark_theme(app):
     app.setStyle("Fusion")
     palette = QPalette()
@@ -34,16 +34,20 @@ def apply_dark_theme(app):
 
 
 def get_video_info_and_thumb(filepath):
+    """
+    Extracts stream metadata (resolution, fps, duration, size) and a keyframe thumbnail preview.
+    Uses OpenCV to inspect video headers and decode frame 12 (avoiding black lead-in frames).
+    """
     cap = cv2.VideoCapture(filepath)
     if not cap.isOpened():
-        return None, "Error leyendo video"
+        return None, "Error reading video"
         
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    # --- CÁLCULO DE LA DURACIÓN ---
+    # Calculate duration string from total frame count and FPS
     duration_str = "0s"
     if fps > 0 and total_frames > 0:
         total_seconds = int(total_frames / fps)
@@ -53,18 +57,13 @@ def get_video_info_and_thumb(filepath):
         seconds = total_seconds % 60
         
         if hours > 0:
-            # Formato para videos largos: 1h 25m 05s
             duration_str = f"{hours}h {minutes}m {seconds:02d}s"
         elif minutes > 0:
-            # Formato para videos medianos: 12m 30s
             duration_str = f"{minutes}m {seconds:02d}s"
         else:
-            # Formato para videos cortos: 45s
             duration_str = f"{seconds}s"
-    # ------------------------------
     
-    # Extraer miniatura (Fotograma cercano al inicio para evitar congelar la interfaz al decodificar)
-    # Evitamos el fotograma 0 porque suele ser totalmente negro (fade in).
+    # Extract representative thumbnail near start (frame 12 avoids black fade-in frames)
     safe_frame = min(12, total_frames - 1) if total_frames > 0 else 0
     cap.set(cv2.CAP_PROP_POS_FRAMES, safe_frame)
     ret, frame = cap.read()
@@ -73,7 +72,6 @@ def get_video_info_and_thumb(filepath):
     pixmap = None
     if ret:
         screen_w = QApplication.primaryScreen().geometry().width()
-        # 200px en 1920p es aproximadamente el 10.4%
         new_w = int(screen_w * 0.104) 
         
         new_h = int(new_w * height / width) if width > 0 else int(new_w * 0.75)
@@ -87,6 +85,7 @@ def get_video_info_and_thumb(filepath):
     size_mb = os.path.getsize(filepath) / (1024 * 1024)
     ext = os.path.splitext(filepath)[1].upper()
     
+    # Construct metadata badge tuple list: (icon, display_value)
     icon_res = qta.icon('fa5s.expand-arrows-alt', color='#888888')
     icon_fps = qta.icon('fa5s.film', color='#888888')
     icon_time = qta.icon('fa5s.clock', color='#888888')
@@ -104,6 +103,10 @@ def get_video_info_and_thumb(filepath):
 
 
 class VideoWorker(QThread):
+    """
+    Dedicated background worker thread for non-blocking video pipeline execution.
+    Manages process lifecycle, inter-thread communication signals, and cancellation.
+    """
     progress = pyqtSignal(int, int)
     log = pyqtSignal(str)
     info = pyqtSignal(str)
@@ -122,7 +125,7 @@ class VideoWorker(QThread):
 
     def run(self):
         try:
-            self.log.emit(f"Iniciando motor NCNN Vulkan en modo {self.mode}...")
+            self.log.emit(f"Starting NCNN Vulkan engine in {self.mode} mode...")
             self.pipeline = VideoPipeline(self.mode, self.model_name, self._on_progress, self._on_log, self._on_info, self.multiplier, self.codec)
             self.pipeline.process(self.input_path, self.output_path)
             self.finished.emit()
@@ -130,6 +133,7 @@ class VideoWorker(QThread):
             self.error.emit(str(e))
 
     def cancel(self):
+        # Forward cancellation request to active pipeline instance
         if self.pipeline:
             self.pipeline.cancel()
 
@@ -148,17 +152,13 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("FHVT Video AI (NCNN Vulkan)")
         
-        # Tamaño dinámico y responsivo
-        self.setMinimumSize(1000, 700) # Tamaño mínimo para que no se deforme
+        # Calculate responsive window dimensions (minimum 1000x700, target 60% width by 80% height of display)
+        self.setMinimumSize(1000, 700)
         
-        # Obtener resolución de pantalla
         screen = QApplication.primaryScreen().geometry()
-        
-        # El tamaño inicial será el 60% de la pantalla actual (así se adapta a 1080p, 4K, 8K)
         initial_width = int(screen.width() * 0.60)
         initial_height = int(screen.height() * 0.80)
         
-        # Evitar que sea más pequeña que el mínimo en pantallas muy chicas
         initial_width = max(initial_width, 1000)
         initial_height = max(initial_height, 700)
         
@@ -171,17 +171,17 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(main_widget)
         layout.setSpacing(15)
 
-        # 1. Top Section (Archivos y Ajustes en 3 columnas)
+        # Top section: Input/Output media cards and processing configuration controls
         top_layout = QHBoxLayout()
         
-        # 1A. Input/Output Selection
-        group_io = QGroupBox("Archivos")
+        # Column 1 & 2: Input and Output media preview cards
+        group_io = QGroupBox("Files")
         io_layout = QHBoxLayout()
         
-        self.drop_in = DropZone("Arrastra o clic para\nSeleccionar Archivo Original", is_interactive=True)
+        self.drop_in = DropZone("Drag & Drop or Click to\nSelect Original File", is_interactive=True)
         self.drop_in.fileDropped.connect(self.select_input_file)
         
-        self.drop_out = DropZone("Archivo Resultante\n(Esperando proceso...)", is_interactive=False)
+        self.drop_out = DropZone("Resulting File\n(Waiting for process...)", is_interactive=False)
         self.drop_out.setEnabled(False)
         
         io_layout.addWidget(self.drop_in, stretch=1)
@@ -190,62 +190,113 @@ class MainWindow(QMainWindow):
         group_io.setLayout(io_layout)
         top_layout.addWidget(group_io, stretch=2)
 
-        # 1B. Hardware and Model Selection
-        self.group_settings = QGroupBox("Ajustes (NCNN Vulkan)")
+        # Column 3: Processing configuration controls
+        self.group_settings = QGroupBox("Settings")
         settings_layout = QVBoxLayout()
-        settings_layout.setSpacing(15)
+        settings_layout.setSpacing(14)
         
-        # Modo
-        settings_layout.addWidget(QLabel("1. Modo de Procesamiento"))
+        # 1. Processing Task & AI Model
+        settings_layout.addWidget(QLabel("1. AI Model & Task"))
         self.combo_mode = QComboBox()
-        self.combo_mode.addItem("Interpolar FPS (RIFE x2)", ("interpolate", 2, "rife-v4.6"))
-        self.combo_mode.addItem("Interpolar FPS (RIFE x3)", ("interpolate", 3, "rife-v4.6"))
-        self.combo_mode.addItem("Interpolar FPS (RIFE x4)", ("interpolate", 4, "rife-v4.6"))
-        self.combo_mode.addItem("Escalar (Anime x2)", ("upscale", 2, "realesr-animevideov3"))
-        self.combo_mode.addItem("Escalar (Anime x3)", ("upscale", 3, "realesr-animevideov3"))
-        self.combo_mode.addItem("Escalar (Anime x4)", ("upscale", 4, "realesr-animevideov3"))
-        self.combo_mode.addItem("Escalar (RealESRGAN x2)", ("upscale", 2, "realesrgan-x4plus"))
-        self.combo_mode.addItem("Escalar (RealESRGAN x3)", ("upscale", 3, "realesrgan-x4plus"))
-        self.combo_mode.addItem("Escalar (RealESRGAN x4)", ("upscale", 4, "realesrgan-x4plus"))
-        self.combo_mode.addItem("Escalar (RealCUGAN x2)", ("upscale_cugan", 2, "models-se"))
-        self.combo_mode.addItem("Escalar (RealCUGAN x3)", ("upscale_cugan", 3, "models-se"))
-        self.combo_mode.addItem("Escalar (RealCUGAN x4)", ("upscale_cugan", 4, "models-se"))
-        self.combo_mode.addItem("Escalar GPU (libplacebo FSR x2)", ("upscale_placebo", 2, None))
-        self.combo_mode.addItem("Escalar GPU (libplacebo FSR x3)", ("upscale_placebo", 3, None))
-        self.combo_mode.addItem("Escalar GPU (libplacebo FSR x4)", ("upscale_placebo", 4, None))
+        self.combo_mode.addItem("Frame Interpolation (RIFE v4.6)", ("interpolate", "rife-v4.6"))
+        self.combo_mode.addItem("AI Upscale - Anime (Real-ESRGAN)", ("upscale", "realesr-animevideov3"))
+        self.combo_mode.addItem("AI Upscale - Realistic (Real-ESRGAN x4+)", ("upscale", "realesrgan-x4plus"))
+        self.combo_mode.addItem("AI Upscale - Anime HQ (Real-CUGAN)", ("upscale_cugan", "models-se"))
+        self.combo_mode.addItem("Fast GPU Upscale (FSR / libplacebo)", ("upscale_placebo", None))
         self.combo_mode.currentIndexChanged.connect(self.update_output_path)
         settings_layout.addWidget(self.combo_mode)
         
-        # GPU
-        settings_layout.addWidget(QLabel("2. Proveedor (Hardware)"))
-        self.combo_gpu = QComboBox()
-        self.combo_gpu.addItems(get_providers())
-        settings_layout.addWidget(self.combo_gpu)
+        # 2. Multiplier Factor (Segmented Buttons: 2x, 3x, 4x)
+        settings_layout.addWidget(QLabel("2. Multiplier Factor"))
+        factor_layout = QHBoxLayout()
+        factor_layout.setSpacing(8)
         
-        # Codec
-        settings_layout.addWidget(QLabel("3. Códec de Salida"))
+        self.factor_group = QButtonGroup(self)
+        self.factor_group.setExclusive(True)
+        
+        btn_factor_style = """
+            QPushButton {
+                background-color: #2D2D2D;
+                color: #BBBBBB;
+                border: 1px solid #444444;
+                border-radius: 5px;
+                padding: 7px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #383838;
+                color: #FFFFFF;
+                border-color: #666666;
+            }
+            QPushButton:checked {
+                background-color: #4CAF50;
+                color: #FFFFFF;
+                border: 1px solid #4CAF50;
+            }
+            QPushButton:disabled {
+                background-color: #222222;
+                color: #555555;
+                border-color: #333333;
+            }
+        """
+        
+        self.factor_buttons = {}
+        for factor in [2, 3, 4]:
+            btn = QPushButton(f"{factor}x")
+            btn.setCheckable(True)
+            btn.setStyleSheet(btn_factor_style)
+            if factor == 2:
+                btn.setChecked(True)
+            btn.clicked.connect(self.update_output_path)
+            self.factor_group.addButton(btn, factor)
+            self.factor_buttons[factor] = btn
+            factor_layout.addWidget(btn)
+            
+        settings_layout.addLayout(factor_layout)
+        
+        # 3. Output Codec
+        settings_layout.addWidget(QLabel("3. Output Codec"))
         self.combo_codec = QComboBox()
-        self.combo_codec.addItem("H.264 (Universal / Lento)", "libx264")
-        self.combo_codec.addItem("H.264 Acelerado (NVENC GPU)", "h264_nvenc")
-        self.combo_codec.addItem("H.265 / HEVC (Eficiente / Lento)", "libx265")
-        self.combo_codec.addItem("H.265 Acelerado (NVENC GPU)", "hevc_nvenc")
-        self.combo_codec.addItem("AV1 (Nueva Gen / Muy Lento)", "libsvtav1")
-        self.combo_codec.addItem("AV1 Acelerado (NVENC RTX 4000+)", "av1_nvenc")
+        codecs_list = [
+            ("Accelerated H.264 (NVENC GPU)", "h264_nvenc"),
+            ("H.264 (Universal / Slow)", "libx264"),
+            ("Accelerated H.265 (NVENC GPU)", "hevc_nvenc"),
+            ("H.265 / HEVC (Efficient / Slow)", "libx265"),
+            ("AV1 (Next Gen / Very Slow)", "libsvtav1"),
+            ("Accelerated AV1 (NVENC RTX 4000+)", "av1_nvenc"),
+        ]
+        for name, enc in codecs_list:
+            if "nvenc" in enc and not check_encoder_support(enc):
+                self.combo_codec.addItem(f"{name} (Unsupported GPU)", enc)
+                idx = self.combo_codec.count() - 1
+                item = self.combo_codec.model().item(idx)
+                if item:
+                    item.setEnabled(False)
+            else:
+                self.combo_codec.addItem(name, enc)
+                
+        # Ensure default selected index is an enabled item
+        for i in range(self.combo_codec.count()):
+            item = self.combo_codec.model().item(i)
+            if item and item.isEnabled():
+                self.combo_codec.setCurrentIndex(i)
+                break
         settings_layout.addWidget(self.combo_codec)
         
-        settings_layout.addStretch() # Empujar componentes hacia arriba para que queden alineados visualmente
+        settings_layout.addStretch()
         
         self.group_settings.setLayout(settings_layout)
         top_layout.addWidget(self.group_settings, stretch=1)
         
         layout.addLayout(top_layout)
 
-        # 3. Consoles Layout
+        # Dual console monitors: General progress summaries and detailed NCNN/FFmpeg technical logs
         consoles_layout = QHBoxLayout()
         
-        # Info Console
+        # Left console: High-level task milestones, chunk timings, and completion statistics
         info_layout = QVBoxLayout()
-        info_layout.addWidget(QLabel("Información General"))
+        info_layout.addWidget(QLabel("General Information"))
         self.info_console = QTextEdit()
         self.info_console.setReadOnly(True)
         font = QFont("Consolas", 10)
@@ -253,9 +304,9 @@ class MainWindow(QMainWindow):
         self.info_console.setStyleSheet("color: #4CAF50;")
         info_layout.addWidget(self.info_console)
         
-        # Tech Console
+        # Right console: Raw stdout/stderr stream from NCNN binaries and FFmpeg subprocesses
         tech_layout = QVBoxLayout()
-        tech_layout.addWidget(QLabel("Registro Técnico (NCNN/FFmpeg)"))
+        tech_layout.addWidget(QLabel("Technical Log (NCNN/FFmpeg)"))
         self.console = QTextEdit()
         self.console.setReadOnly(True)
         font_tech = QFont("Consolas", 8)
@@ -268,12 +319,12 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(consoles_layout)
 
-        # 4. Progress (Indeterminate for NCNN usually)
+        # Global task progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
 
-        # 5. Actions
+        # Primary action controls: Start and Cancel
         btn_layout = QHBoxLayout()
         
         btn_style = """
@@ -300,37 +351,73 @@ class MainWindow(QMainWindow):
             }
         """
         
-        self.btn_start = QPushButton("Iniciar")
+        self.btn_start = QPushButton("Start Video AI")
         self.btn_start.setMinimumHeight(40)
         self.btn_start.setStyleSheet(btn_style)
         self.btn_start.clicked.connect(self.start_processing)
         
-        self.btn_cancel = QPushButton("Cancelar")
+        self.btn_cancel = QPushButton("Cancel")
         self.btn_cancel.setMinimumHeight(40)
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setStyleSheet(btn_style)
         self.btn_cancel.clicked.connect(self.cancel_processing)
+
+        self.btn_interpolate_images = QPushButton("🖼️ Interpolate Image Sequence...")
+        self.btn_interpolate_images.setMinimumHeight(40)
+        self.btn_interpolate_images.setStyleSheet("""
+            QPushButton {
+                background-color: #252525;
+                border: 1px solid #4CAF50;
+                border-radius: 4px;
+                color: #4CAF50;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 0 15px;
+            }
+            QPushButton:hover {
+                background-color: #2E4B31;
+                color: #FFFFFF;
+            }
+            QPushButton:pressed {
+                background-color: #1B331D;
+            }
+        """)
+        self.btn_interpolate_images.clicked.connect(self.open_image_interpolator)
         
-        btn_layout.addWidget(self.btn_start)
-        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_start, stretch=2)
+        btn_layout.addWidget(self.btn_cancel, stretch=1)
+        btn_layout.addWidget(self.btn_interpolate_images, stretch=2)
         layout.addLayout(btn_layout)
         
         self.input_file = ""
         self.output_file = ""
 
+    def open_image_interpolator(self):
+        # Open dedicated modal dialog for folder-based image sequence interpolation
+        from ui.image_interpolator_dialog import ImageInterpolatorDialog
+        dlg = ImageInterpolatorDialog(self)
+        dlg.exec()
+
+    def get_current_multiplier(self):
+        # Query active checked button in factor group (defaults to 2 if unassigned)
+        btn_id = self.factor_group.checkedId()
+        return btn_id if btn_id in [2, 3, 4] else 2
+
     def update_output_path(self):
+        # Generate standardized output filename based on input path, selected model, and multiplier
         if not self.input_file:
             return
             
         mode_data = self.combo_mode.currentData()
         if not mode_data: return
-        mode, multiplier, model = mode_data
+        mode, model = mode_data
+        multiplier = self.get_current_multiplier()
         
         base, ext = os.path.splitext(self.input_file)
         
         if mode == "interpolate":
             motor = "RIFE"
-            tarea = "Interpolacion"
+            tarea = "Interpolation"
             multi = f"x{multiplier}"
         elif mode == "upscale":
             motor = "RealESRGAN" if model and "x4plus" in str(model) else "AnimeV3"
@@ -346,37 +433,38 @@ class MainWindow(QMainWindow):
             multi = f"x{multiplier}"
         else:
             motor = "NCNN"
-            tarea = "IA"
+            tarea = "AI"
             multi = ""
             
         suffix = f"_{motor}_{tarea}_{multi}"
         self.output_file = f"{base}{suffix}{ext}"
         
-        # Filtro de texto para evitar que rompa la tarjeta
         out_name = os.path.basename(self.output_file)
         display_name = out_name.replace("_", "_\u200B").replace("-", "-\u200B").replace(".", ".\u200B")
-        self.drop_out.lbl_title.setText(f"Salida planeada:\n{display_name}")
+        self.drop_out.lbl_title.setText(f"Planned Output:\n{display_name}")
 
     def select_input_file(self, filepath):
+        # Bind selected input file, populate metadata thumbnail card, and recalculate output target
         self.input_file = filepath
         pixmap, details = get_video_info_and_thumb(filepath)
         self.drop_in.set_video_data(filepath, pixmap, details)
         
-        # Reset output
-        self.drop_out.reset("Archivo Resultante\n(Esperando proceso...)")
+        # Reset output preview card to waiting state
+        self.drop_out.reset("Resulting File\n(Waiting for process...)")
         self.update_output_path()
 
     def log_msg(self, msg):
+        # Append message to technical log and auto-scroll to latest entry
         self.console.append(msg)
         scrollbar = self.console.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
     def info_msg(self, msg):
+        # Handle carriage return character (\r) to overwrite current line for in-place progress updates
         if msg.startswith("\r"):
             clean_msg = msg[1:]
             cursor = self.info_console.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.End)
-            # Aseguramos borrar solo el texto de la línea actual, no el separador de bloque
             cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
             cursor.removeSelectedText()
             cursor.insertText(clean_msg)
@@ -387,13 +475,15 @@ class MainWindow(QMainWindow):
         scrollbar.setValue(scrollbar.maximum())
 
     def start_processing(self):
+        # Validate input and output paths before starting pipeline execution
         if not self.input_file:
-            self.log_msg("⚠️ Selecciona un video de entrada primero.")
+            self.log_msg("⚠️ Please select an input video first.")
             return
 
         if not self.input_file or not self.output_file:
             return
             
+        # Lock user interactive controls during active execution
         self.btn_start.setEnabled(False)
         self.drop_in.setEnabled(False)
         self.group_settings.setEnabled(False)
@@ -404,13 +494,23 @@ class MainWindow(QMainWindow):
         self.console.clear()
         self.info_console.clear()
         
-        # UI Feedback de procesamiento
+        # Transition output dropzone to active processing spinner
         self.drop_out.setEnabled(True)
         self.drop_out.set_loading(True)
         
-        mode, multiplier, model = self.combo_mode.currentData()
+        mode, model = self.combo_mode.currentData()
+        multiplier = self.get_current_multiplier()
         codec = self.combo_codec.currentData()
 
+        # Hardware safety guard: Validate target hardware video encoder prior to launching task
+        if "nvenc" in codec and not check_encoder_support(codec):
+            self.log_msg(f"❌ Error: Hardware encoder '{codec}' is not supported by your GPU.")
+            self.info_msg(f"❌ Error: Hardware encoder '{codec}' is not supported by your GPU.")
+            self.drop_out.reset("Unsupported Codec")
+            self.reset_ui()
+            return
+
+        # Instantiate and start background worker thread
         self.worker = VideoWorker(mode, model, self.input_file, self.output_file, multiplier, codec)
         self.worker.progress.connect(self.update_progress)
         self.worker.log.connect(self.log_msg)
@@ -420,11 +520,12 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def cancel_processing(self):
+        # Trigger cooperative cancellation of worker thread and child processes
         if self.worker:
             self.worker.cancel()
             self.btn_cancel.setEnabled(False)
-            self.info_msg("Cancelando... esperando a que termine el subproceso...")
-            self.log_msg("Cancelando... esperando a que termine el subproceso...")
+            self.info_msg("Cancelling... waiting for subprocess to exit...")
+            self.log_msg("Cancelling... waiting for subprocess to exit...")
 
     def update_progress(self, current, total):
         self.progress_bar.setRange(0, total)
@@ -433,18 +534,19 @@ class MainWindow(QMainWindow):
     def on_error(self, err):
         self.info_msg(f"❌ ERROR: {err}")
         self.log_msg(f"❌ ERROR: {err}")
-        self.drop_out.reset("Error en el proceso")
+        self.drop_out.reset("Process Error")
         self.reset_ui()
         
     def on_finished(self):
+        # Update output preview card with generated media thumbnail and metadata if file exists
         if os.path.exists(self.output_file):
-            self.info_msg("✅ Operación terminada.")
-            self.log_msg("✅ Operación terminada.")
+            self.info_msg("✅ Operation finished.")
+            self.log_msg("✅ Operation finished.")
             pixmap, details = get_video_info_and_thumb(self.output_file)
             self.drop_out.set_loading(False)
             self.drop_out.set_video_data(self.output_file, pixmap, details)
         else:
-            self.drop_out.reset("Operación Cancelada")
+            self.drop_out.reset("Operation Cancelled")
             
         self.reset_ui()
         
@@ -452,7 +554,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         
-        # Desbloquear Interfaz
+        # Restore interactive controls
         self.btn_start.setEnabled(True)
         self.drop_in.setEnabled(True)
         self.group_settings.setEnabled(True)

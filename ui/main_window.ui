@@ -43,7 +43,7 @@
                         <item>
                             <widget class="QGroupBox" name="group_io">
                                 <property name="title">
-                                    <string>Archivos</string>
+                                    <string>Files</string>
                                 </property>
                                 <layout class="QHBoxLayout" name="io_layout" stretch="1,1">
                                     <item>
@@ -58,16 +58,16 @@
                         <item>
                             <widget class="QGroupBox" name="group_settings">
                                 <property name="title">
-                                    <string>Ajustes (NCNN Vulkan)</string>
+                                    <string>Settings</string>
                                 </property>
                                 <layout class="QVBoxLayout" name="settings_layout">
                                     <property name="spacing">
-                                        <number>15</number>
+                                        <number>14</number>
                                     </property>
                                     <item>
                                         <widget class="QLabel" name="lbl_modo">
                                             <property name="text">
-                                                <string>1. Modo de Procesamiento</string>
+                                                <string>1. AI Model &amp; Task</string>
                                             </property>
                                         </widget>
                                     </item>
@@ -75,19 +75,53 @@
                                         <widget class="QComboBox" name="combo_mode"/>
                                     </item>
                                     <item>
-                                        <widget class="QLabel" name="lbl_hardware">
+                                        <widget class="QLabel" name="lbl_factor">
                                             <property name="text">
-                                                <string>2. Proveedor (Hardware)</string>
+                                                <string>2. Multiplier Factor</string>
                                             </property>
                                         </widget>
                                     </item>
                                     <item>
-                                        <widget class="QComboBox" name="combo_gpu"/>
+                                        <layout class="QHBoxLayout" name="factor_layout">
+                                            <item>
+                                                <widget class="QPushButton" name="btn_factor_2x">
+                                                    <property name="text">
+                                                        <string>2x</string>
+                                                    </property>
+                                                    <property name="checkable">
+                                                        <bool>true</bool>
+                                                    </property>
+                                                    <property name="checked">
+                                                        <bool>true</bool>
+                                                    </property>
+                                                </widget>
+                                            </item>
+                                            <item>
+                                                <widget class="QPushButton" name="btn_factor_3x">
+                                                    <property name="text">
+                                                        <string>3x</string>
+                                                    </property>
+                                                    <property name="checkable">
+                                                        <bool>true</bool>
+                                                    </property>
+                                                </widget>
+                                            </item>
+                                            <item>
+                                                <widget class="QPushButton" name="btn_factor_4x">
+                                                    <property name="text">
+                                                        <string>4x</string>
+                                                    </property>
+                                                    <property name="checkable">
+                                                        <bool>true</bool>
+                                                    </property>
+                                                </widget>
+                                            </item>
+                                        </layout>
                                     </item>
                                     <item>
                                         <widget class="QLabel" name="lbl_codec">
                                             <property name="text">
-                                                <string>3. Códec de Salida</string>
+                                                <string>3. Output Codec</string>
                                             </property>
                                         </widget>
                                     </item>
@@ -119,7 +153,7 @@
                                 <item>
                                     <widget class="QLabel" name="lbl_info">
                                         <property name="text">
-                                            <string>Información General</string>
+                                            <string>General Information</string>
                                         </property>
                                     </widget>
                                 </item>
@@ -140,7 +174,7 @@
                                 <item>
                                     <widget class="QLabel" name="lbl_tech">
                                         <property name="text">
-                                            <string>Registro Técnico (NCNN/FFmpeg)</string>
+                                            <string>Technical Log (NCNN/FFmpeg)</string>
                                         </property>
                                     </widget>
                                 </item>
@@ -184,7 +218,7 @@
                                     </string>
                                 </property>
                                 <property name="text">
-                                    <string>Iniciar</string>
+                                    <string>Start</string>
                                 </property>
                             </widget>
                         </item>
@@ -208,7 +242,7 @@
                                     </string>
                                 </property>
                                 <property name="text">
-                                    <string>Cancelar</string>
+                                    <string>Cancel</string>
                                 </property>
                             </widget>
                         </item>

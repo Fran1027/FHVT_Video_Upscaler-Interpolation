@@ -15,17 +15,37 @@ Thumbs.db
 # Binarios gigantes y modelos de IA (No subir a GitHub)
 bin/
 
-# Archivos y carpetas temporales de FFmpeg
+# Archivos y carpetas temporales de procesamiento
 .tmp_in_frames/
 .tmp_out_frames/
 .tmp_chunks/
+.tmp_work_sequence/
+scratch/
+test_input/
+test_output/
+complete_python_code.txt
 *.tmp
 *.log
 
-# Archivos locales o de pruebas (opcional)
+# Archivos de configuración y secretos (Privacidad)
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.p12
+credentials*
+secrets*
+
+# Archivos locales de prueba y medios
 *.mp4
 *.mkv
 *.avi
 *.mov
+*.webm
+*.flv
+*.ts
 *.jpg
+*.jpeg
 *.png
+*.webp
